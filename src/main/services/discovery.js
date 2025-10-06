@@ -338,39 +338,34 @@ async function discoverTrack({ origin, source, uploadId, user }, http) {
   const apiResult = await discoverViaApi(uploadId, user, http);
   errors.push(...apiResult.errors);
   let trackInfo = apiResult.trackInfo;
-  let jobs = apiResult.jobs;
-  let stageUsed = jobs.length ? 'api' : null;
 
-  if (!jobs.length) {
-    const legacyResult = await discoverViaLegacyM3u(uploadId, http);
-    errors.push(...legacyResult.errors);
-    if (legacyResult.jobs.length) {
-      jobs = legacyResult.jobs;
-      stageUsed = 'legacy-m3u';
-    }
-  }
+  const legacyResult = await discoverViaLegacyM3u(uploadId, http);
+  errors.push(...legacyResult.errors);
 
-  if (!jobs.length) {
-    const htmlResult = await discoverViaHtmlTemplates(uploadId, http);
-    errors.push(...htmlResult.errors);
-    if (htmlResult.jobs.length) {
-      jobs = htmlResult.jobs;
-      stageUsed = 'html-template';
-    }
-  }
+  const htmlResult = await discoverViaHtmlTemplates(uploadId, http);
+  errors.push(...htmlResult.errors);
 
   const resolvedUser = trackInfo?.artistSlug || user || null;
-  if (!jobs.length) {
-    const trackPageResult = await discoverViaTrackPage(resolvedUser, uploadId, http);
-    errors.push(...trackPageResult.errors);
-    if (trackPageResult.jobs.length) {
-      jobs = trackPageResult.jobs;
-      stageUsed = 'track-page';
-    }
-  }
+  const trackPageResult = await discoverViaTrackPage(resolvedUser, uploadId, http);
+  errors.push(...trackPageResult.errors);
+
+  const allJobs = [
+    ...apiResult.jobs,
+    ...legacyResult.jobs,
+    ...htmlResult.jobs,
+    ...trackPageResult.jobs
+  ];
+  const jobs = dedupeByUrl(allJobs);
+
+  const usedStages = [];
+  if (apiResult.jobs.length) usedStages.push('api');
+  if (legacyResult.jobs.length) usedStages.push('legacy-m3u');
+  if (htmlResult.jobs.length) usedStages.push('html-template');
+  if (trackPageResult.jobs.length) usedStages.push('track-page');
+  const stageUsed = usedStages.length ? usedStages.join(', ') : null;
 
   const finalTrackInfo = trackInfo || buildTrackInfo(uploadId, null, resolvedUser);
-  const finalJobs = dedupeByUrl(jobs).map((job) => applyMetadata(job, finalTrackInfo, resolvedUser, uploadId));
+  const finalJobs = jobs.map((job) => applyMetadata(job, finalTrackInfo, resolvedUser, uploadId));
 
   return {
     origin,
@@ -382,7 +377,6 @@ async function discoverTrack({ origin, source, uploadId, user }, http) {
     errors
   };
 }
-
 async function searchByQuery(query, http) {
   const trimmed = query?.trim();
   if (!trimmed) return [];
@@ -471,3 +465,5 @@ export async function discoverAllFromSources(sourcesInput = [], query = '', opti
 
   return results;
 }
+
+
