@@ -3,15 +3,17 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import got from 'got';
-import unzipper from 'unzipper';
+
+const { default: got } = await import('got');
+const unzipper = await import('unzipper');
 
 const DEFAULT_SETTINGS = {
   downloadRoot: '',
   concurrency: 4,
   unzipEnabled: true,
   structureTemplate: '{artist}/{title}/{kind}',
-  sidecarsEnabled: true
+  sidecarsEnabled: true,
+  strictSSL: true
 };
 
 const BROWSER_HEADERS = {
@@ -106,7 +108,7 @@ function isDownloadRootError(error) {
   return Boolean(error && (error.code === 'DOWNLOAD_ROOT_INVALID' || error instanceof DownloadRootError));
 }
 
-async function streamWithResume(url, tmpPath, referer, onProgress) {
+async function streamWithResume(url, tmpPath, referer, onProgress, strictSSL = true) {
   let attemptUrl = url;
   let attempt = 0;
   let existingBytes = await getFileSize(tmpPath);
@@ -122,7 +124,8 @@ async function streamWithResume(url, tmpPath, referer, onProgress) {
       await new Promise((resolve, reject) => {
         const stream = got.stream(attemptUrl, {
           headers,
-          timeout: { request: 60000 }
+          timeout: { request: 60000 },
+          https: { rejectUnauthorized: strictSSL }
         });
         stream.on('downloadProgress', (progress) => {
           const received = existingBytes + progress.transferred;
@@ -200,7 +203,7 @@ async function downloadJob(job, settings, onProgress) {
   await ensureDir(paths.jobDir);
 
   const referer = job.meta?.pageUrl || '';
-  await streamWithResume(job.url, paths.tmpPath, referer, onProgress);
+  await streamWithResume(job.url, paths.tmpPath, referer, onProgress, settings.strictSSL);
 
   await fsp.rm(paths.finalPath, { force: true });
   await fsp.rename(paths.tmpPath, paths.finalPath);
@@ -259,6 +262,7 @@ export function createDownloadQueue(initialSettings = {}) {
       unzipEnabled: next.unzipEnabled ?? settings.unzipEnabled,
       structureTemplate: next.structureTemplate ?? settings.structureTemplate,
       sidecarsEnabled: next.sidecarsEnabled ?? settings.sidecarsEnabled,
+      strictSSL: next.strictSSL ?? settings.strictSSL,
       downloadRoot: next.downloadRoot ?? settings.downloadRoot
     };
   }

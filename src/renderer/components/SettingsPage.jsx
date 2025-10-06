@@ -5,7 +5,8 @@ const EMPTY_SETTINGS = {
   concurrency: 4,
   unzipEnabled: true,
   structureTemplate: '{artist}/{title}/{kind}',
-  sidecarsEnabled: true
+  sidecarsEnabled: true,
+  strictSSL: true
 };
 
 export default function SettingsPage({ settings, validation, onSave, onReset, onChooseDownloadRoot }) {
@@ -18,7 +19,8 @@ export default function SettingsPage({ settings, validation, onSave, onReset, on
         concurrency: settings.concurrency,
         unzipEnabled: Boolean(settings.unzipEnabled),
         structureTemplate: settings.structureTemplate,
-        sidecarsEnabled: settings.sidecarsEnabled ?? true
+        sidecarsEnabled: settings.sidecarsEnabled ?? true,
+        strictSSL: settings.strictSSL ?? true
       });
     }
   }, [settings]);
@@ -66,7 +68,7 @@ export default function SettingsPage({ settings, validation, onSave, onReset, on
               onClick={handleChoose}
               className="border-l border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
             >
-              Choose…
+              Chooseï¿½
             </button>
           </div>
           {!validation?.valid && (
@@ -122,6 +124,16 @@ export default function SettingsPage({ settings, validation, onSave, onReset, on
               className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-500"
             />
             <span className="ml-2">Write ATTRIBUTION.txt and LICENSE.txt</span>
+          </label>
+          <label className="inline-flex items-center text-sm text-slate-700">
+            <input
+              type="checkbox"
+              name="strictSSL"
+              checked={draft.strictSSL}
+              onChange={handleChange}
+              className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-500"
+            />
+            <span className="ml-2">Strict SSL certificate validation (disable only if you encounter certificate errors)</span>
           </label>
         </div>
       </div>

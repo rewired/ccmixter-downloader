@@ -8,14 +8,16 @@ const ARTIST_PAGE_SIZE = 20;
 const MAX_ARTIST_PAGES = 10;
 const MAX_ARTIST_UPLOADS = 50;
 
-const http = got.extend({
-  headers: {
-    'user-agent': USER_AGENT,
-    accept: 'application/json,text/html;q=0.9,*/*;q=0.8'
-  },
-  timeout: { request: 25000 },
-  https: { rejectUnauthorized: true }
-});
+function createHttpClient(strictSSL = true) {
+  return got.extend({
+    headers: {
+      'user-agent': USER_AGENT,
+      accept: 'application/json,text/html;q=0.9,*/*;q=0.8'
+    },
+    timeout: { request: 25000 },
+    https: { rejectUnauthorized: strictSSL }
+  });
+}
 
 function normalizeSources(input) {
   if (!input) return [];
@@ -136,7 +138,7 @@ function applyMetadata(job, trackInfo, fallbackUser, uploadId) {
   return { ...job, meta: enrichedMeta };
 }
 
-async function safeJson(url) {
+async function safeJson(url, http) {
   try {
     const data = await http(url).json();
     return { data };
@@ -145,7 +147,7 @@ async function safeJson(url) {
   }
 }
 
-async function safeText(url) {
+async function safeText(url, http) {
   try {
     const data = await http(url).text();
     return { data };
@@ -154,7 +156,7 @@ async function safeText(url) {
   }
 }
 
-async function discoverViaApi(uploadId, fallbackUser) {
+async function discoverViaApi(uploadId, fallbackUser, http) {
   const errors = [];
   const base = 'https://ccmixter.org/api/query?f=json';
   const filesUrl = `${base}&dataview=files&ids=${uploadId}`;
@@ -214,9 +216,9 @@ function parseM3u(text) {
   return urls;
 }
 
-async function discoverViaLegacyM3u(uploadId) {
+async function discoverViaLegacyM3u(uploadId, http) {
   const url = `https://ccmixter.org/api/query?f=m3u&ids=${uploadId}`;
-  const { data, error } = await safeText(url);
+  const { data, error } = await safeText(url, http);
   if (error) {
     return { jobs: [], errors: [`Legacy M3U failed: ${error.message || error}`] };
   }
@@ -265,12 +267,12 @@ function extractDownloadUrls(html) {
   return Array.from(urls);
 }
 
-async function discoverViaHtmlTemplates(uploadId) {
+async function discoverViaHtmlTemplates(uploadId, http) {
   const collected = new Set();
   const errors = [];
   for (const variant of HTML_TEMPLATE_VARIANTS) {
     const endpoint = `https://ccmixter.org/api/query?f=html&t=${variant}&ids=${uploadId}`;
-    const { data, error } = await safeText(endpoint);
+    const { data, error } = await safeText(endpoint, http);
     if (error) {
       errors.push(`HTML template ${variant} failed: ${error.message || error}`);
       continue;
@@ -283,12 +285,12 @@ async function discoverViaHtmlTemplates(uploadId) {
   return { jobs, errors };
 }
 
-async function discoverViaTrackPage(user, uploadId) {
+async function discoverViaTrackPage(user, uploadId, http) {
   if (!user) {
     return { jobs: [], errors: ['Track page lookup skipped: missing artist slug'] };
   }
   const endpoint = `https://ccmixter.org/files/${user}/${uploadId}`;
-  const { data, error } = await safeText(endpoint);
+  const { data, error } = await safeText(endpoint, http);
   if (error) {
     return { jobs: [], errors: [`Track page scrape failed: ${error.message || error}`] };
   }
@@ -298,7 +300,7 @@ async function discoverViaTrackPage(user, uploadId) {
   return { jobs, errors: [] };
 }
 
-async function extractUploadTargetsFromArtistPages(artist) {
+async function extractUploadTargetsFromArtistPages(artist, http) {
   const targets = [];
   const errors = [];
   const seenUploadIds = new Set();
@@ -306,7 +308,7 @@ async function extractUploadTargetsFromArtistPages(artist) {
   for (let page = 0; page < MAX_ARTIST_PAGES && targets.length < MAX_ARTIST_UPLOADS; page++) {
     const offset = page * ARTIST_PAGE_SIZE;
     const endpoint = `https://ccmixter.org/people/${artist}?offset=${offset}`;
-    const { data, error } = await safeText(endpoint);
+    const { data, error } = await safeText(endpoint, http);
     if (error) {
       errors.push(`Artist page ${page + 1} failed: ${error.message || error}`);
       break;
@@ -331,16 +333,16 @@ async function extractUploadTargetsFromArtistPages(artist) {
   return { targets, errors };
 }
 
-async function discoverTrack({ origin, source, uploadId, user }) {
+async function discoverTrack({ origin, source, uploadId, user }, http) {
   const errors = [];
-  const apiResult = await discoverViaApi(uploadId, user);
+  const apiResult = await discoverViaApi(uploadId, user, http);
   errors.push(...apiResult.errors);
   let trackInfo = apiResult.trackInfo;
   let jobs = apiResult.jobs;
   let stageUsed = jobs.length ? 'api' : null;
 
   if (!jobs.length) {
-    const legacyResult = await discoverViaLegacyM3u(uploadId);
+    const legacyResult = await discoverViaLegacyM3u(uploadId, http);
     errors.push(...legacyResult.errors);
     if (legacyResult.jobs.length) {
       jobs = legacyResult.jobs;
@@ -349,7 +351,7 @@ async function discoverTrack({ origin, source, uploadId, user }) {
   }
 
   if (!jobs.length) {
-    const htmlResult = await discoverViaHtmlTemplates(uploadId);
+    const htmlResult = await discoverViaHtmlTemplates(uploadId, http);
     errors.push(...htmlResult.errors);
     if (htmlResult.jobs.length) {
       jobs = htmlResult.jobs;
@@ -359,7 +361,7 @@ async function discoverTrack({ origin, source, uploadId, user }) {
 
   const resolvedUser = trackInfo?.artistSlug || user || null;
   if (!jobs.length) {
-    const trackPageResult = await discoverViaTrackPage(resolvedUser, uploadId);
+    const trackPageResult = await discoverViaTrackPage(resolvedUser, uploadId, http);
     errors.push(...trackPageResult.errors);
     if (trackPageResult.jobs.length) {
       jobs = trackPageResult.jobs;
@@ -381,11 +383,11 @@ async function discoverTrack({ origin, source, uploadId, user }) {
   };
 }
 
-async function searchByQuery(query) {
+async function searchByQuery(query, http) {
   const trimmed = query?.trim();
   if (!trimmed) return [];
   const url = `https://ccmixter.org/api/query?f=json&search=${encodeURIComponent(trimmed)}`;
-  const { data, error } = await safeJson(url);
+  const { data, error } = await safeJson(url, http);
   if (error) {
     return [];
   }
@@ -402,9 +404,11 @@ async function searchByQuery(query) {
   }));
 }
 
-export async function discoverAllFromSources(sourcesInput = [], query = '') {
+export async function discoverAllFromSources(sourcesInput = [], query = '', options = {}) {
+  const { strictSSL = true } = options;
+  const http = createHttpClient(strictSSL);
   if (query && query.trim()) {
-    return await searchByQuery(query);
+    return await searchByQuery(query, http);
   }
 
   const sources = normalizeSources(sourcesInput);
@@ -423,12 +427,12 @@ export async function discoverAllFromSources(sourcesInput = [], query = '') {
         source,
         uploadId: classification.uploadId,
         user: classification.user
-      }));
+      }, http));
       continue;
     }
 
     if (classification.kind === 'artist') {
-      const expansion = await extractUploadTargetsFromArtistPages(classification.artist);
+      const expansion = await extractUploadTargetsFromArtistPages(classification.artist, http);
       if (!expansion.targets.length) {
         results.push({
           origin: source,
@@ -449,7 +453,7 @@ export async function discoverAllFromSources(sourcesInput = [], query = '') {
           source: target.source,
           uploadId: target.uploadId,
           user: target.user
-        }));
+        }, http));
       }
       continue;
     }
