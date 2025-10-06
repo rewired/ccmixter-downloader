@@ -21,7 +21,8 @@ function extractSettings(payload = {}) {
     concurrency: Number.parseInt(payload.concurrency ?? 4, 10) || 4,
     unzipEnabled: payload.unzipEnabled ?? true,
     structureTemplate: payload.structureTemplate ?? '{artist}/{title}/{kind}',
-    sidecarsEnabled: payload.sidecarsEnabled ?? true
+    sidecarsEnabled: payload.sidecarsEnabled ?? true,
+    strictSSL: payload.strictSSL ?? true
   };
 }
 
